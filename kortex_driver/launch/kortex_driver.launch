@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <launch>
-    
+
     <!-- Arm configuration -->
     <arg name="arm" default="gen3"/>
     <arg name="dof" default="7" if="$(eval arg('arm') == 'gen3')"/> <!-- Number of degrees of freedom of the arm -->
@@ -16,6 +16,9 @@
     <!-- Namespace -->
     <arg name="robot_name" default="my_$(arg arm)"/>
     <arg name="prefix" default=""/>
+
+    <!-- Robot description (for simulation) -->
+    <arg name="robot_description" default="/$(arg arm)/robot_description" />
 
     <!-- Kortex API options -->
     <arg name="ip_address" default="192.168.1.10"/>
@@ -74,23 +77,25 @@
             <param name="use_hard_limits" value="$(arg use_hard_limits)"/>
             <param name="robot_name" value="$(arg robot_name)"/>
             <param name="prefix" value="$(arg prefix)"/>
+            <param name="robot_description" value="$(arg robot_description)" />
+            <param name="start_moveit" value="$(arg start_moveit)" />
             <rosparam command="load" file="$(find kortex_description)/arms/$(arg arm)/$(arg dof)dof/config/joint_limits.yaml" subst_value="true"/>
             <!-- If there is a gripper, load the active joint names for it -->
             <rosparam command="load" file="$(find kortex_description)/grippers/$(arg gripper)/config/joint_limits.yaml" unless="$(eval not arg('gripper'))" subst_value="true"/>
         </node>
-        
+
         <!-- Start MoveIt! main executable -->
         <group if="$(arg start_moveit)">
 
             <!-- TODO Find cleaner way to do that and that will work with other arms -->
             <!-- Without gripper -->
-            <include file="$(find kortex_description)/../kortex_move_it_config/$(arg arm)_move_it_config/launch/move_group.launch" if="$(eval not arg('gripper'))"> 
+            <include file="$(find kortex_description)/../kortex_move_it_config/$(arg arm)_move_it_config/launch/move_group.launch" if="$(eval not arg('gripper'))">
                 <arg name="dof" value="$(arg dof)"/>
                 <arg name="use_hard_limits" value="$(arg use_hard_limits)"/>
                 <arg name="prefix" value="$(arg prefix)"/>
             </include>
             <!-- With gripper -->
-            <include file="$(find kortex_description)/../kortex_move_it_config/$(arg arm)_$(arg gripper)_move_it_config/launch/move_group.launch" unless="$(eval not arg('gripper'))"> 
+            <include file="$(find kortex_description)/../kortex_move_it_config/$(arg arm)_$(arg gripper)_move_it_config/launch/move_group.launch" unless="$(eval not arg('gripper'))">
                 <arg name="dof" value="$(arg dof)"/>
                 <arg name="use_hard_limits" value="$(arg use_hard_limits)"/>
                 <arg name="prefix" value="$(arg prefix)"/>
@@ -107,7 +112,7 @@
         <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
 
         <!-- Start RViz -->
-        <node name="rviz" pkg="rviz" type="rviz" output="log" args="-f base_link" if="$(arg start_rviz)"/> 
+        <node name="rviz" pkg="rviz" type="rviz" output="log" args="-f base_link" if="$(arg start_rviz)"/>
 
         <!-- Tests -->
         <!-- Initialization test and custom functional tests -->

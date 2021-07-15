@@ -133,6 +133,9 @@ class KortexArmSimulation
     std::string m_prefix;
     std::string m_robot_name;
 
+    // Robot description topic
+    std::string m_robot_description;
+
     // Arm information
     std::string m_arm_name;
     std::vector<std::string> m_arm_joint_names;
@@ -151,6 +154,8 @@ class KortexArmSimulation
     std::vector<float> m_gripper_joint_limits_max;
     std::vector<float> m_gripper_joint_limits_min;
     int m_degrees_of_freedom;
+
+    bool m_start_moveit;
 
     // The indexes of the first arm joint and of the gripper joint in the "joint_states" feedback
     int m_first_arm_joint_index;

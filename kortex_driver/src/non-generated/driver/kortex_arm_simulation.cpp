@@ -33,7 +33,7 @@
 #include <set>
 #include <chrono>
 
-namespace 
+namespace
 {
     static const std::string ARM_PLANNING_GROUP = "arm";
     static const std::string GRIPPER_PLANNING_GROUP = "gripper";
@@ -55,9 +55,15 @@ KortexArmSimulation::KortexArmSimulation(ros::NodeHandle& node_handle): m_node_h
     ros::param::get("~robot_name", m_robot_name);
     ros::param::get("~prefix", m_prefix);
 
+    // Robot description path -- the default is /m_robot_name/robot_description, but it may be elsewhere
+    ros::param::get("~robot_description", m_robot_description);
+
+    // Should we start moveit actions?
+    ros::param::get("~start_moveit", m_start_moveit);
+
     // Arm information
     urdf::Model model;
-    model.initParam("/" + m_robot_name + "/robot_description");
+    model.initParam(m_robot_description);
     ros::param::get("~dof", m_degrees_of_freedom);
     ros::param::get("~arm", m_arm_name);
     ros::param::get("~joint_names", m_arm_joint_names);
@@ -77,7 +83,7 @@ KortexArmSimulation::KortexArmSimulation(ros::NodeHandle& node_handle): m_node_h
     ros::param::get("~maximum_angular_velocity", m_max_cartesian_twist_angular);
     ros::param::get("~maximum_linear_acceleration", m_max_cartesian_acceleration_linear);
     ros::param::get("~maximum_angular_acceleration", m_max_cartesian_acceleration_angular);
-    
+
     // Gripper information
     ros::param::get("~gripper", m_gripper_name);
     if (IsGripperPresent())
@@ -118,13 +124,13 @@ KortexArmSimulation::KortexArmSimulation(ros::NodeHandle& node_handle): m_node_h
     KDL::Tree tree;
     if (!kdl_parser::treeFromParam("robot_description", tree))
     {
-        const std::string error_string("Failed to parse robot_description parameter to build the kinematic tree!"); 
+        const std::string error_string("Failed to parse robot_description parameter to build the kinematic tree!");
         ROS_ERROR("%s", error_string.c_str());
         throw(std::runtime_error(error_string));
     }
     if (!tree.getChain(m_prefix + "base_link", m_prefix + "tool_frame", m_chain))
     {
-        const std::string error_string("Failed to extract kinematic chain from parsed tree!"); 
+        const std::string error_string("Failed to extract kinematic chain from parsed tree!");
         ROS_ERROR("%s", error_string.c_str());
         throw(std::runtime_error(error_string));
     }
@@ -139,14 +145,17 @@ KortexArmSimulation::KortexArmSimulation(ros::NodeHandle& node_handle): m_node_h
     }
 
     // Start MoveIt client
-    m_moveit_arm_interface.reset(new moveit::planning_interface::MoveGroupInterface(ARM_PLANNING_GROUP));
-    if (IsGripperPresent())
+    if (m_start_moveit)
     {
-        m_moveit_gripper_interface.reset(new moveit::planning_interface::MoveGroupInterface(GRIPPER_PLANNING_GROUP));   
-    }
+      m_moveit_arm_interface.reset(new moveit::planning_interface::MoveGroupInterface(ARM_PLANNING_GROUP));
+      if (IsGripperPresent())
+      {
+          m_moveit_gripper_interface.reset(new moveit::planning_interface::MoveGroupInterface(GRIPPER_PLANNING_GROUP));
+      }
 
-    // Create default actions
-    CreateDefaultActions();
+      // Create default actions
+      CreateDefaultActions();
+    }
 
     // Create publishers and subscribers
     for (int i = 0; i < GetDOF(); i++)
@@ -169,12 +178,12 @@ KortexArmSimulation::KortexArmSimulation(ros::NodeHandle& node_handle): m_node_h
     // Create service clients
     m_client_switch_controllers = m_node_handle.serviceClient<controller_manager_msgs::SwitchController>
         ("/" + m_robot_name + "/controller_manager/switch_controller");
-    
+
     // Fill controllers'names
     m_trajectory_controllers_list.push_back(m_prefix + m_arm_name + "_joint_trajectory_controller"); // only one trajectory controller
-    m_position_controllers_list.resize(GetDOF()); // one position controller per 
-    std::generate(m_position_controllers_list.begin(), 
-                    m_position_controllers_list.end(), 
+    m_position_controllers_list.resize(GetDOF()); // one position controller per
+    std::generate(m_position_controllers_list.begin(),
+                    m_position_controllers_list.end(),
                     [this]() -> std::string
                     {
                         static int i = 1;
@@ -325,7 +334,7 @@ kortex_driver::ReadAllActions::Response KortexArmSimulation::ReadAllActions(cons
         {
             action_list.action_list.push_back(a.second);
         }
-        
+
     }
     response.output = action_list;
     return response;
@@ -352,7 +361,7 @@ kortex_driver::DeleteAction::Response KortexArmSimulation::DeleteAction(const ko
     {
         ROS_ERROR("Cannot delete default simulated actions.");
     }
-    
+
     return kortex_driver::DeleteAction::Response();
 }
 
@@ -382,7 +391,7 @@ kortex_driver::UpdateAction::Response KortexArmSimulation::UpdateAction(const ko
     }
     else
     {
-       ROS_ERROR("Cannot update default simulated actions."); 
+       ROS_ERROR("Cannot update default simulated actions.");
     }
 
     return kortex_driver::UpdateAction::Response();
@@ -401,7 +410,7 @@ kortex_driver::ExecuteActionFromReference::Response KortexArmSimulation::Execute
     {
         ROS_ERROR("Could not find action with given identifier %d", handle.identifier);
     }
-    
+
     return kortex_driver::ExecuteActionFromReference::Response();
 }
 
@@ -438,7 +447,7 @@ kortex_driver::StopAction::Response KortexArmSimulation::StopAction(const kortex
     {
         m_gripper_action_client->cancelAllGoals();
     }
-    
+
     return kortex_driver::StopAction::Response();
 }
 
@@ -452,7 +461,7 @@ kortex_driver::PlayCartesianTrajectory::Response KortexArmSimulation::PlayCartes
 
     JoinThreadAndCancelAction(); // this will block until the thread is joined and current action finished
     m_action_executor_thread = std::thread(&KortexArmSimulation::PlayAction, this, action);
-    
+
     return kortex_driver::PlayCartesianTrajectory::Response();
 }
 
@@ -468,7 +477,7 @@ kortex_driver::SendTwistCommand::Response KortexArmSimulation::SendTwistCommand(
     m_twist_command.angular_x = m_math_util.toRad(m_twist_command.angular_x);
     m_twist_command.angular_x = m_math_util.toRad(m_twist_command.angular_y);
     m_twist_command.angular_x = m_math_util.toRad(m_twist_command.angular_z);
-    
+
     // Fill the twist command
     m_twist_command = twist_command.twist;
 
@@ -492,7 +501,7 @@ kortex_driver::PlayJointTrajectory::Response KortexArmSimulation::PlayJointTraje
 
     JoinThreadAndCancelAction(); // this will block until the thread is joined and current action finished
     m_action_executor_thread = std::thread(&KortexArmSimulation::PlayAction, this, action);
-    
+
     return kortex_driver::PlayJointTrajectory::Response();
 }
 
@@ -507,7 +516,7 @@ kortex_driver::SendJointSpeedsCommand::Response KortexArmSimulation::SendJointSp
     // Fill the velocity commands vector
     int n = 0;
     std::generate(m_velocity_commands.begin(),
-        m_velocity_commands.end(), 
+        m_velocity_commands.end(),
         [this, &action, &n]() -> double
         {
             return m_math_util.toRad(action.oneof_action_parameters.send_joint_speeds[0].joint_speeds[n++].value);
@@ -519,7 +528,7 @@ kortex_driver::SendJointSpeedsCommand::Response KortexArmSimulation::SendJointSp
         JoinThreadAndCancelAction(); // this will block until the thread is joined and current action finished
         m_action_executor_thread = std::thread(&KortexArmSimulation::PlayAction, this, action);
     }
-    
+
     return kortex_driver::SendJointSpeedsCommand::Response();
 }
 
@@ -533,7 +542,7 @@ kortex_driver::SendGripperCommand::Response KortexArmSimulation::SendGripperComm
 
     JoinThreadAndCancelAction(); // this will block until the thread is joined and current action finished
     m_action_executor_thread = std::thread(&KortexArmSimulation::PlayAction, this, action);
-    
+
     return kortex_driver::SendGripperCommand::Response();
 }
 
@@ -705,7 +714,7 @@ void KortexArmSimulation::PlayAction(const kortex_driver::Action& action)
     m_pub_action_topic.publish(start_notif);
     m_is_action_being_executed = true;
     m_current_action_type = action.handle.action_type;
-    
+
     // Switch executor on the action type
     switch (action.handle.action_type)
     {
@@ -731,7 +740,7 @@ void KortexArmSimulation::PlayAction(const kortex_driver::Action& action)
             action_result = FillKortexError(kortex_driver::ErrorCodes::ERROR_DEVICE, kortex_driver::SubErrorCodes::UNSUPPORTED_ACTION);
             break;
     }
-    
+
     // Oddly enough, gripper actions don't send notifications through Kortex API when they end
     if (action.handle.action_type != kortex_driver::ActionType::SEND_GRIPPER_COMMAND)
     {
@@ -752,7 +761,7 @@ void KortexArmSimulation::PlayAction(const kortex_driver::Action& action)
                 // Notify ACTION_ABORT
                 end_notif.action_event = kortex_driver::ActionEvent::ACTION_ABORT;
                 end_notif.abort_details = action_result.subCode;
-                ROS_WARN("Action was failed : \nError code is %d\nSub-error code is %d\nError description is : %s", 
+                ROS_WARN("Action was failed : \nError code is %d\nSub-error code is %d\nError description is : %s",
                             action_result.code,
                             action_result.subCode,
                             action_result.description.c_str());
@@ -765,7 +774,7 @@ void KortexArmSimulation::PlayAction(const kortex_driver::Action& action)
         }
         m_pub_action_topic.publish(end_notif);
     }
-    
+
     m_is_action_being_executed = false;
 }
 
@@ -930,7 +939,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteReachJointAngles(const ko
     {
         return result;
     }
-    
+
     // Send goal
     control_msgs::FollowJointTrajectoryActionGoal goal;
     traj.header.stamp = ros::Time::now();
@@ -1005,9 +1014,9 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteReachPose(const kortex_dr
         const std::lock_guard<std::mutex> lock(m_state_mutex);
         current = m_current_state;
     }
-    
+
     // Get Start frame
-    // For the Rotation part : ThetaX = gamma, ThetaY = beta, ThetaZ = alpha 
+    // For the Rotation part : ThetaX = gamma, ThetaY = beta, ThetaZ = alpha
     auto start = KDL::Frame();
     Eigen::VectorXd positions_eigen(m_degrees_of_freedom);
     for (int i = 0; i < GetDOF(); i++)
@@ -1115,7 +1124,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteReachPose(const kortex_dr
     {
         // First get the next Cartesian position and twists
         auto pos = segment.Pos(t);
-        
+
         // Position is enough to have a smooth trajectory it seems but if eventually vel and acc are useful somehow this is how to get them:
         // auto vel = segment.Vel(t);
         // auto acc = segment.Acc(t);
@@ -1135,7 +1144,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteReachPose(const kortex_dr
         {
             p.positions.push_back(current_joints(i));
         }
-        
+
         // Add trajectory point to goal
         traj.points.push_back(p);
         previous = current_joints;
@@ -1150,7 +1159,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteReachPose(const kortex_dr
     {
         p.positions.push_back(current_joints(i));
     }
-    
+
     // Add trajectory point to goal
     traj.points.push_back(p);
 
@@ -1159,7 +1168,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteReachPose(const kortex_dr
     {
         return result;
     }
-    
+
     // Send goal
     control_msgs::FollowJointTrajectoryActionGoal goal;
     goal.goal.trajectory = traj;
@@ -1220,7 +1229,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendJointSpeeds(const kor
         const std::lock_guard<std::mutex> lock(m_state_mutex);
         current = m_current_state;
     }
-    
+
     // Initialise commands
     std::vector<double> commands(GetDOF(), 0.0); // in rad
     for (int i = 0; i < GetDOF(); i++)
@@ -1231,7 +1240,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendJointSpeeds(const kor
     std::vector<double> velocity_commands(GetDOF(), 0.0); // in rad/s
     std::vector<double> previous_velocity_commands(GetDOF(), 0.0); // in rad/s
     std::vector<bool> stopped(GetDOF(), false);
-    
+
     // While we're not done
     while (true)
     {
@@ -1253,7 +1262,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendJointSpeeds(const kor
             // Calculate permitted velocity command because we don't have infinite acceleration
             double vel_delta = m_velocity_commands[i] - previous_velocity_commands[i];
             double max_delta = std::copysign(m_arm_acceleration_max_limits[i] * JOINT_TRAJECTORY_TIMESTEP_SECONDS, vel_delta);
-            
+
             // If the velocity change is within acceleration limits for this timestep
             double velocity_command;
             if (fabs(vel_delta) < fabs(max_delta))
@@ -1357,7 +1366,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendTwist(const kortex_dr
         const std::lock_guard<std::mutex> lock(m_state_mutex);
         current = m_current_state;
     }
-    
+
     // Initialise commands
     std::vector<double> commands(GetDOF(), 0.0); // in rad
     for (int i = 0; i < GetDOF(); i++)
@@ -1456,11 +1465,11 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendTwist(const kortex_dr
             commands_eigen[i] = commands[i];
         }
         commands_kdl.data = commands_eigen;
-        
+
         // Fill KDL Twist structure with Kortex twist
         KDL::Twist twist_kdl = KDL::Twist(KDL::Vector(twist_command.linear_x, twist_command.linear_y, twist_command.linear_z),
                                             KDL::Vector(twist_command.angular_x, twist_command.angular_y, twist_command.angular_z));
-        
+
         // Call IK and fill joint velocity commands
         KDL::JntArray joint_velocities(GetDOF());
         int ik_result = m_ik_vel_solver->CartToJnt(commands_kdl, twist_kdl, joint_velocities);
@@ -1468,7 +1477,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendTwist(const kortex_dr
         {
             ROS_WARN("IK ERROR = %d", ik_result);
         }
-        
+
         // We need to know if the joint velocities have to be adjusted, and by what ratio
         double ratio = 1.0;
         for (int i = 0; i < GetDOF(); i++)
@@ -1476,7 +1485,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendTwist(const kortex_dr
             // Calculate permitted velocity command because we don't have infinite acceleration
             double vel_delta = joint_velocities(i) - previous_velocity_commands[i];
             double max_delta = std::copysign(m_arm_acceleration_max_limits[i] * JOINT_TRAJECTORY_TIMESTEP_SECONDS, vel_delta);
-            
+
             // If we cannot instantly accelerate to this velocity
             if (fabs(vel_delta) > fabs(max_delta))
             {
@@ -1500,7 +1509,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendTwist(const kortex_dr
             {
                 commands[i] = std::min(m_arm_joint_limits_max[i], commands[i]);
             }
-            
+
             // Send the position increments to the controllers
             std_msgs::Float64 message;
             message.data = commands[i];
@@ -1589,7 +1598,7 @@ kortex_driver::KortexError KortexArmSimulation::ExecuteSendGripperCommand(const 
     else
     {
         auto status = m_gripper_action_client->getResult();
-        
+
         if (!status->reached_goal)
         {
             result = FillKortexError(kortex_driver::ErrorCodes::ERROR_DEVICE,
